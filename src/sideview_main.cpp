@@ -6,7 +6,42 @@
 #include <cstdio>
 #include <vector>
 #include "sideview/LevelModel.h"
+#include <fstream>
+#include <sstream>
 
+bool loadTreasures(const std::string& path, std::vector<Treasure>& result)
+{
+    std::ifstream file(path);
+
+    if (!file)
+        return false;
+
+    std::string line;
+
+    while (std::getline(file, line))
+    {
+        if (line.empty())
+            continue;
+
+        std::istringstream row(line);
+        int x = 0;
+        int floor = 0;
+        std::string extra;
+
+        if (!(row >> x >> floor) || (row >> extra))
+            return false;
+
+        if (x < 0 || x > SCREEN_W - PLAYER_W ||
+            (floor != 0 && floor != 1))
+        {
+            return false;
+        }
+
+        result.push_back({ x, floor, false });
+    }
+
+    return !result.empty() && !file.bad();
+}
 
 int main(int argc, char* argv[])
 {
@@ -69,8 +104,11 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::string assetsPath = std::string(basePath) + "assets/";
+    std::string baseDirectory(basePath);
     SDL_free(basePath);
+
+    std::string assetsPath = baseDirectory + "assets/";
+    std::string levelPath = baseDirectory + "levels/sideview01.txt";
 
     std::string playerPath = assetsPath + "player.png";
     std::string guardPath = assetsPath + "guard.png";
@@ -121,11 +159,20 @@ int main(int argc, char* argv[])
 
     const std::vector<Guard> initialGuards = guards;
 
-    std::vector<Treasure> treasures
+    std::vector<Treasure> treasures;
+
+    if (!loadTreasures(levelPath, treasures))
     {
-        { 260, 1, false }, // Lower floor
-        { 40,  0, false }  // Top floor
-    };
+        std::fprintf(stderr, "Cannot load level: %s\n", levelPath.c_str());
+
+        SDL_DestroyTexture(guardTexture);
+        SDL_DestroyTexture(playerTexture);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        IMG_Quit();
+        SDL_Quit();
+        return 1;
+    }
 
     constexpr int EXIT_X = 280;
     constexpr int EXIT_FLOOR = 0;

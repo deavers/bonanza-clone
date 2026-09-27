@@ -27,6 +27,12 @@ struct Guard
     float alertTimer = 0.0f;
 };
 
+struct Loot
+{
+    SDL_Rect rect;
+    bool taken = false;
+};
+
 int main(int argc, char* argv[])
 {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -64,13 +70,34 @@ int main(int argc, char* argv[])
 
     float spawnX = 32.0f, spawnY = 32.0f;
     std::vector<Guard> guards;
+    std::vector<Loot> loot;
+    SDL_Rect exitRect{ 0, 0, TILE, TILE };
+    bool hasExit = false;
+
     for (int ty = 0; ty < levelH; ty++)
         for (int tx = 0; tx < levelW; tx++)
         {
             if (level[ty][tx] == 'P') { spawnX = (float)(tx * TILE); spawnY = (float)(ty * TILE); }
             if (level[ty][tx] == 'G') guards.push_back({ (float)(tx * TILE), (float)(ty * TILE), 1 });
+            if (level[ty][tx] == 'L')
+                loot.push_back({ { tx * TILE, ty * TILE, TILE, TILE }, false });
+
+            if (level[ty][tx] == 'E')
+            {
+                exitRect = { tx * TILE, ty * TILE, TILE, TILE };
+                hasExit = true;
+            }
         }
     float playerX = spawnX, playerY = spawnY;
+    const std::vector<Guard> initialGuards = guards;
+    if (!hasExit || loot.empty())
+    {
+        std::fprintf(stderr, "Level needs E and at least one L\n");
+        return 1;
+    }
+
+    int collected = 0;
+    bool won = false;
 
     SDL_Texture* floorTex  = IMG_LoadTexture(renderer, "assets/floor.png");
     SDL_Texture* wallTex   = IMG_LoadTexture(renderer, "assets/wall.png");
@@ -142,6 +169,21 @@ int main(int argc, char* argv[])
     bool running = true;
     bool facingLeft = false;
 
+    auto resetLevel = [&]()
+    {
+        playerX = spawnX;
+        playerY = spawnY;
+        guards = initialGuards;
+
+        for (auto& item : loot)
+            item.taken = false;
+
+        collected = 0;
+        won = false;
+        facingLeft = false;
+        SDL_SetWindowTitle(window, "bonanza-clone");
+    };
+
     while (running)
     {
         Uint64 now = SDL_GetPerformanceCounter();
@@ -151,111 +193,145 @@ int main(int argc, char* argv[])
 
         SDL_Event e;
         while (SDL_PollEvent(&e))
-            if (e.type == SDL_QUIT) running = false;
+        {
+            if (e.type == SDL_QUIT)
+                running = false;
+
+            if (e.type == SDL_KEYDOWN)
+            {
+                if (e.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+                    running = false;
+
+                if (e.key.keysym.scancode == SDL_SCANCODE_R && won)
+                    resetLevel();
+            }
+        }
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
 
         // Player movement
-        float dx = 0, dy = 0;
-        if (keys[SDL_SCANCODE_LEFT])  
-        { 
-            dx = -playerSpeed * dt; 
-            facingLeft = true; 
-        }
-        if (keys[SDL_SCANCODE_RIGHT])
-        { 
-            dx =  playerSpeed * dt; 
-            facingLeft = false; 
-        }
-        if (keys[SDL_SCANCODE_UP])      
-            dy = -playerSpeed * dt;
-        if (keys[SDL_SCANCODE_DOWN])    
-            dy =  playerSpeed * dt;
-        if (!hitsWall(playerX + dx, playerY)) 
-            playerX += dx;
-        if (!hitsWall(playerX, playerY + dy)) 
-            playerY += dy;
-
-        // Guard
-        for (auto& g : guards)
+        if (!won)
         {
-            if (canSeePlayer(g))
-            {
-                g.alertTimer = 1.5f;
-            }
-            else if (g.alertTimer > 0.0f)
-            {
-                g.alertTimer -= dt;
-            }
-
-            if (g.alertTimer > 0.0f)
-            {
-                g.mode = GuardMode::Chase;
-
-                if (playerX > g.x)
-                    g.dir = 1;
-                else if (playerX < g.x)
-                    g.dir = -1;
-            }
-            else
-            {
-                g.alertTimer = 0.0f;
-                g.mode = GuardMode::Patrol;
-            }
-
-            const float speed = (g.mode == GuardMode::Chase)
-                ? 85.0f
-                : guardSpeed;
-
-            const float nextX = g.x + g.dir * speed * dt;
-
-            if (hitsWall(nextX, g.y))
-            {
-                if (g.mode == GuardMode::Patrol)
-                    g.dir = -g.dir;
-            }
-            else
-            {
-                g.x = nextX;
-            }
-        }
-
-        // Collision detection
-        SDL_Rect pr
-        { 
-            (int)playerX, (int)playerY, 
-            PLAYER_W, PLAYER_H 
-        };
-        bool caught = false;
-        for (auto& g : guards)
-        {
-            SDL_Rect gr
+            float dx = 0, dy = 0;
+            if (keys[SDL_SCANCODE_LEFT])  
             { 
-                (int)g.x, (int)g.y, 
-                PLAYER_W, PLAYER_H 
-            };
-
-            if (SDL_HasIntersection(&pr, &gr)) 
-            { 
-                caught = true; 
-                break; 
+                dx = -playerSpeed * dt; 
+                facingLeft = true; 
             }
-        }
-        if (caught)
-        {
-            printf("CATCH! RESPAWN.\n");
-            playerX = spawnX;
-            playerY = spawnY;
+            if (keys[SDL_SCANCODE_RIGHT])
+            { 
+                dx =  playerSpeed * dt; 
+                facingLeft = false; 
+            }
+            if (keys[SDL_SCANCODE_UP])      
+                dy = -playerSpeed * dt;
+            if (keys[SDL_SCANCODE_DOWN])    
+                dy =  playerSpeed * dt;
+            if (!hitsWall(playerX + dx, playerY)) 
+                playerX += dx;
+            if (!hitsWall(playerX, playerY + dy)) 
+                playerY += dy;
 
+            // Guard
             for (auto& g : guards)
             {
-                g.mode = GuardMode::Patrol;
-                g.alertTimer = 0.0f;
+                if (canSeePlayer(g))
+                {
+                    g.alertTimer = 1.5f;
+                }
+                else if (g.alertTimer > 0.0f)
+                {
+                    g.alertTimer -= dt;
+                }
+
+                if (g.alertTimer > 0.0f)
+                {
+                    g.mode = GuardMode::Chase;
+
+                    if (playerX > g.x)
+                        g.dir = 1;
+                    else if (playerX < g.x)
+                        g.dir = -1;
+                }
+                else
+                {
+                    g.alertTimer = 0.0f;
+                    g.mode = GuardMode::Patrol;
+                }
+
+                const float speed = (g.mode == GuardMode::Chase)
+                    ? 85.0f
+                    : guardSpeed;
+
+                const float nextX = g.x + g.dir * speed * dt;
+
+                if (hitsWall(nextX, g.y))
+                {
+                    if (g.mode == GuardMode::Patrol)
+                        g.dir = -g.dir;
+                }
+                else
+                {
+                    g.x = nextX;
+                }
+            }
+
+            // Collision detection
+            SDL_Rect pr
+            { 
+                (int)playerX, (int)playerY, 
+                PLAYER_W, PLAYER_H 
+            };
+            bool caught = false;
+            for (auto& g : guards)
+            {
+                SDL_Rect gr
+                { 
+                    (int)g.x, (int)g.y, 
+                    PLAYER_W, PLAYER_H 
+                };
+
+                if (SDL_HasIntersection(&pr, &gr)) 
+                { 
+                    caught = true; 
+                    break; 
+                }
+            }
+            if (caught)
+            {
+                printf("CATCH! RESPAWN.\n");
+                playerX = spawnX;
+                playerY = spawnY;
+
+                for (auto& g : guards)
+                {
+                    g.mode = GuardMode::Patrol;
+                    g.alertTimer = 0.0f;
+                }
+            }
+
+            pr.x = (int)playerX;
+            pr.y = (int)playerY;
+            if (!caught)
+            {
+                for (auto& item : loot)
+                {
+                    if (!item.taken && SDL_HasIntersection(&pr, &item.rect))
+                    {
+                        item.taken = true;
+                        ++collected;
+                        std::printf("Loot: %d/%zu\n", collected, loot.size());
+                    }
+                }
+
+                if (collected == static_cast<int>(loot.size()) &&
+                    SDL_HasIntersection(&pr, &exitRect))
+                {
+                    won = true;
+                    SDL_SetWindowTitle(window, "Mission complete! Press R to restart");
+                    std::printf("MISSION COMPLETE!\n");
+                }
             }
         }
-
-        pr.x = (int)playerX;
-        pr.y = (int)playerY;
-
         // RENDER
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
@@ -268,11 +344,37 @@ int main(int argc, char* argv[])
                     level[ty][tx] == '#' ? wallTex : floorTex, nullptr, &dst);
             }
 
+        bool exitOpen = collected == static_cast<int>(loot.size());
+
+        if (exitOpen)
+            SDL_SetRenderDrawColor(renderer, 60, 210, 100, 255);
+        else
+            SDL_SetRenderDrawColor(renderer, 110, 110, 120, 255);
+
+        SDL_Rect exitShape{
+            exitRect.x + 2, exitRect.y + 2,
+            TILE - 4, TILE - 4
+        };
+        SDL_RenderFillRect(renderer, &exitShape);
+
+        SDL_SetRenderDrawColor(renderer, 255, 210, 60, 255);
+        for (const auto& item : loot)
+        {
+            if (item.taken)
+                continue;
+
+            SDL_Rect shape{
+                item.rect.x + 5, item.rect.y + 5,
+                TILE - 10, TILE - 10
+            };
+            SDL_RenderFillRect(renderer, &shape);
+        }
+            
         for (auto& g : guards)
         {
             SDL_Rect gr{ (int)g.x, (int)g.y, PLAYER_W, PLAYER_H };
             SDL_RenderCopyEx(renderer, guardTex, nullptr, &gr, 0, nullptr,
-                             g.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+                 g.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
             SDL_Rect indicator{ static_cast<int>(g.x) + 6,
                     static_cast<int>(g.y) - 5, 4, 4 };
 
@@ -283,8 +385,15 @@ int main(int argc, char* argv[])
             }
         }
 
-        SDL_RenderCopyEx(renderer, playerTex, nullptr, &pr, 0, nullptr,
-                         facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+        SDL_Rect renderPlayer
+        {
+            static_cast<int>(playerX),
+            static_cast<int>(playerY),
+            PLAYER_W,
+            PLAYER_H
+        };
+        SDL_RenderCopyEx(renderer, playerTex, nullptr, &renderPlayer, 0, nullptr,
+                 facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
         SDL_RenderPresent(renderer);
     }
 

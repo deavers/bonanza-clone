@@ -5,46 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include "sideview/LevelModel.h"
 
-constexpr int SCREEN_W = 320;
-constexpr int SCREEN_H = 224;
-constexpr int SCALE = 3;
-
-constexpr int PLAYER_W = 16;
-constexpr int PLAYER_H = 22;
-
-constexpr int TOP_FLOOR_Y = 96;
-constexpr int BOTTOM_FLOOR_Y = 192;
-constexpr int LADDER_X = 144;
-
-int floorY(int floor)
-{
-    return floor == 0 ? TOP_FLOOR_Y : BOTTOM_FLOOR_Y;
-}
-
-struct Treasure
-{
-    int x;
-    int floor; // 0 - top, 1 - bottom
-    bool taken = false;
-};
-
-struct Guard
-{
-    float x;
-    int floor;
-    int dir;
-    float minX;
-    float maxX;
-    float stunTimer = 0.0f;
-};
-
-std::vector<Guard> guards{
-    { 200.0f, 1,  1, 170.0f, 280.0f }, // Lower floor
-    { 200.0f, 0, -1, 160.0f, 260.0f }  // Top floor
-};
-
-const std::vector<Guard> initialGuards = guards;
 
 int main(int argc, char* argv[])
 {
@@ -150,6 +112,14 @@ int main(int argc, char* argv[])
     float playerY = static_cast<float>(floorY(currentFloor) - PLAYER_H);
     bool climbing = false;
     bool facingLeft = false;
+    bool inBackLane = false;
+
+    std::vector<Guard> guards{
+        { 200.0f, 1,  1, 170.0f, 280.0f },
+        { 200.0f, 0, -1, 160.0f, 260.0f }
+    };
+
+    const std::vector<Guard> initialGuards = guards;
 
     std::vector<Treasure> treasures
     {
@@ -192,6 +162,7 @@ int main(int argc, char* argv[])
                 playerY = static_cast<float>(floorY(1) - PLAYER_H);
                 climbing = false;
                 facingLeft = false;
+                inBackLane = false;
                 guards = initialGuards;
                 won = false;
 
@@ -205,7 +176,8 @@ int main(int argc, char* argv[])
                 event.key.keysym.scancode == SDL_SCANCODE_SPACE &&
                 event.key.repeat == 0 &&
                 !won &&
-                !climbing)
+                !climbing &&
+                !inBackLane)
             {
                 float playerCenter = playerX + PLAYER_W / 2.0f;
                 int shotDirection = facingLeft ? -1 : 1;
@@ -224,6 +196,27 @@ int main(int argc, char* argv[])
                         std::printf("Guard stunned!\n");
                         break;
                     }
+                }
+            }
+
+            if (event.type == SDL_KEYDOWN &&
+                event.key.keysym.scancode == SDL_SCANCODE_E &&
+                event.key.repeat == 0 &&
+                !won &&
+                !climbing)
+            {
+                float playerCenter = playerX + PLAYER_W / 2.0f;
+
+                bool nearLeftDoor =
+                    std::fabs(playerCenter - (DOOR_LEFT_X + PLAYER_W / 2.0f)) <= 12.0f;
+
+                bool nearRightDoor =
+                    std::fabs(playerCenter - (DOOR_RIGHT_X + PLAYER_W / 2.0f)) <= 12.0f;
+
+                if (nearLeftDoor || nearRightDoor)
+                {
+                    inBackLane = !inBackLane;
+                    std::printf("Lane: %s\n", inBackLane ? "back" : "front");
                 }
             }
         }
@@ -255,7 +248,7 @@ int main(int argc, char* argv[])
                 float ladderCenterX = LADDER_X + PLAYER_W / 2.0f;
                 bool nearLadder = std::fabs(playerCenterX - ladderCenterX) <= 12.0f;
 
-                if (nearLadder &&
+                if (nearLadder && !inBackLane &&
                     currentFloor == 1 &&
                     keys[SDL_SCANCODE_UP])
                 {
@@ -263,7 +256,7 @@ int main(int argc, char* argv[])
                     targetFloor = 0;
                     climbing = true;
                 }
-                else if (nearLadder &&
+                else if (nearLadder && !inBackLane &&
                         currentFloor == 0 &&
                         keys[SDL_SCANCODE_DOWN])
                 {
@@ -288,6 +281,7 @@ int main(int argc, char* argv[])
                 {
                     currentFloor = targetFloor;
                     climbing = false;
+                    inBackLane = false;
                 }
             }
 
@@ -326,8 +320,12 @@ int main(int argc, char* argv[])
 
                 for (const auto& guard : guards)
                 {
-                    if (guard.floor != currentFloor || guard.stunTimer > 0.0f)
+                    if (inBackLane ||
+                        guard.floor != currentFloor ||
+                        guard.stunTimer > 0.0f)
+                    {
                         continue;
+                    }
 
                     SDL_Rect guardBox{
                         static_cast<int>(guard.x),
@@ -352,6 +350,7 @@ int main(int argc, char* argv[])
                     targetFloor = 1;
                     playerY = static_cast<float>(floorY(1) - PLAYER_H);
                     climbing = false;
+                    inBackLane = false;
                     guards = initialGuards;
 
                     continue; // Skip the rest of the loop to avoid processing further after being caught
@@ -359,8 +358,12 @@ int main(int argc, char* argv[])
 
                 for (auto& treasure : treasures)
                 {
-                    if (treasure.taken || treasure.floor != currentFloor)
+                    if (inBackLane ||
+                        treasure.taken ||
+                        treasure.floor != currentFloor)
+                    {
                         continue;
+                    }
 
                     SDL_Rect treasureBox{
                         treasure.x + 3,
@@ -392,7 +395,8 @@ int main(int argc, char* argv[])
                     PLAYER_H
                 };
 
-                if (allCollected &&
+                if (!inBackLane &&
+                    allCollected &&
                     currentFloor == EXIT_FLOOR &&
                     SDL_HasIntersection(&playerBox, &exitBox))
                 {
@@ -420,6 +424,25 @@ int main(int argc, char* argv[])
             BOTTOM_FLOOR_Y - TOP_FLOOR_Y
         };
         SDL_RenderFillRect(renderer, &ladder);
+
+        SDL_SetRenderDrawColor(renderer, 95, 140, 170, 255);
+
+        const int doorXs[] = { DOOR_LEFT_X, DOOR_RIGHT_X };
+
+        for (int floor = 0; floor < 2; ++floor)
+        {
+            for (int doorX : doorXs)
+            {
+                SDL_Rect door{
+                    doorX,
+                    floorY(floor) - PLAYER_H,
+                    PLAYER_W,
+                    PLAYER_H
+                };
+
+                SDL_RenderDrawRect(renderer, &door);
+            }
+        }
 
         bool allCollected = std::all_of(
             treasures.begin(),
@@ -494,6 +517,11 @@ int main(int argc, char* argv[])
             PLAYER_H
         };
 
+        if (inBackLane)
+            SDL_SetTextureColorMod(playerTexture, 135, 135, 135);
+        else
+            SDL_SetTextureColorMod(playerTexture, 255, 255, 255);
+
         SDL_RenderCopyEx(
             renderer,
             playerTexture,
@@ -513,6 +541,6 @@ int main(int argc, char* argv[])
     SDL_DestroyWindow(window);
     IMG_Quit();
     SDL_Quit();
-    
+
     return 0;
 }

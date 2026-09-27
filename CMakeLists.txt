@@ -17,4 +17,6 @@ target_link_libraries(bonanza PRIVATE
 add_custom_command(TARGET bonanza POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:bonanza>/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/levels $<TARGET_FILE_DIR:bonanza>/levels
 )

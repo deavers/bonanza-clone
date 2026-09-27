@@ -1,4 +1,5 @@
 #include <SDL.h>
+#include <SDL_image.h>
 #include <cstdio>
 
 // Standart W and H (SEGA GENESIS)
@@ -13,6 +14,11 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
+    if (!IMG_Init(IMG_INIT_PNG))
+    {
+        std::fprintf(stderr, "IMG_Init failed: %s\n", IMG_GetError());
+        return 1;
+    }
 
     SDL_Window* window = SDL_CreateWindow(
         "bonanza-clone",
@@ -23,20 +29,33 @@ int main(int argc, char* argv[])
     SDL_Renderer* renderer = SDL_CreateRenderer(
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
     );
-
-    // Rendering virtual window
     SDL_RenderSetLogicalSize(renderer, SCREEN_W, SCREEN_H);
 
-    // Player (16x24)
-    SDL_Rect player {
-        152, 100,
-        16, 24
-    };
-    const int speed = 2; // pixels for frame
+    SDL_Texture* playerTex = IMG_LoadTexture(renderer, "assets/player.png");
+    if (!playerTex)
+    {
+        printf("Failed to load sprite: %s\n", IMG_GetError());
+        return 1;
+    }
 
+    float playerX = 152.0f, playerY = 100.0f;
+    constexpr int PLAYER_W = 16, PLAYER_H = 24;
+    const float speed = 120.0f; // pixels per second
+    bool facingLeft = false;
+
+    Uint64 prevTime = SDL_GetPerformanceCounter();
     bool running = true;
+
     while (running)
     {
+        Uint64 now = SDL_GetPerformanceCounter();
+        float dt = (float)(now - prevTime) /
+                   (float)SDL_GetPerformanceFrequency();
+        prevTime = now;
+        if (dt > 0.05f)
+            dt = 0.05f;
+
+        
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
@@ -47,36 +66,49 @@ int main(int argc, char* argv[])
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
 
         if (keys[SDL_SCANCODE_LEFT])
-            player.x -= speed;
+        {
+            playerX -= speed * dt;
+            facingLeft = true;
+        }
         if (keys[SDL_SCANCODE_RIGHT])
-            player.x += speed;
+        {
+            playerX += speed * dt;
+            facingLeft = false;
+        }
         if (keys[SDL_SCANCODE_UP])
-            player.y -= speed;
+            playerY -= speed * dt;
         if (keys[SDL_SCANCODE_DOWN])
-            player.y += speed;
+            playerY += speed * dt;
 
         // Collision
-        if (player.x < 0)
-            player.x = 0;
-        if (player.y < 0)
-            player.y = 0;
-        if (player.x > SCREEN_W - player.w)
-            player.x = SCREEN_W - player.w;
-        if (player.y > SCREEN_H - player.h)
-            player.y = SCREEN_H - player.h;
+        if (playerX < 0)
+            playerX = 0;
+        if (playerY < 0)
+            playerY = 0;
+        if (playerX > SCREEN_W - PLAYER_W)
+            playerX = (float)(SCREEN_W - PLAYER_W);
+        if (playerY > SCREEN_H - PLAYER_H)
+            playerY = (float)(SCREEN_H - PLAYER_H);
         
-        // Background
+        SDL_Rect dst {
+            (int)playerX, (int)playerY,
+            PLAYER_W, PLAYER_H
+        };
+        SDL_RendererFlip flip = facingLeft
+            ? SDL_FLIP_HORIZONTAL
+            : SDL_FLIP_NONE;
+
+        // Background color and clear
         SDL_SetRenderDrawColor(renderer, 20, 20, 40, 255);
         SDL_RenderClear(renderer);
-
-        // Brother
-        SDL_SetRenderDrawColor(renderer, 250, 220, 60, 255);
-        SDL_RenderFillRect(renderer, &player);
+        SDL_RenderCopyEx(renderer, playerTex, nullptr, &dst, 0, nullptr, flip);
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(playerTex);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+    IMG_Quit();
     SDL_Quit();
     return 0;
 }

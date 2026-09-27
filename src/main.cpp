@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <cmath>
 
 // Standart W and H (SEGA GENESIS)
 constexpr int SCREEN_W = 320;
@@ -12,10 +13,18 @@ constexpr int SCALE = 3;
 constexpr int TILE = 16;
 constexpr int PLAYER_W = 16, PLAYER_H = 22;
 
+enum class GuardMode
+{
+    Patrol,
+    Chase
+};
+
 struct Guard
 {
     float x, y;
     int dir = 1;
+    GuardMode mode = GuardMode::Patrol;
+    float alertTimer = 0.0f;
 };
 
 int main(int argc, char* argv[])
@@ -88,6 +97,44 @@ int main(int argc, char* argv[])
         return false;
     };
 
+    auto canSeePlayer = [&](const Guard& g)
+    {
+        const float guardEyeX = g.x + PLAYER_W / 2.0f;
+        const float guardEyeY = g.y + 8.0f;
+        const float playerEyeX = playerX + PLAYER_W / 2.0f;
+        const float playerEyeY = playerY + 8.0f;
+
+        const float deltaX = playerEyeX - guardEyeX;
+        const float deltaY = playerEyeY - guardEyeY;
+
+        if (deltaX * g.dir <= 0.0f ||
+            std::fabs(deltaX) > 96.0f ||
+            std::fabs(deltaY) > 10.0f)
+        {
+            return false;
+        }
+
+        const float distance = std::fabs(deltaX);
+       
+
+        for (float travelled = 4.0f; travelled < distance; travelled += 4.0f)
+        {
+            const float x = guardEyeX + g.dir * travelled;
+            const float y = guardEyeY + deltaY * (travelled / distance);
+
+            const int tx = static_cast<int>(x) / TILE;
+            const int ty = static_cast<int>(y) / TILE;
+
+            if (tx < 0 || tx >= levelW || ty < 0 || ty >= levelH ||
+                level[ty][tx] == '#')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
     const float playerSpeed = 100.0f;
     const float guardSpeed  = 60.0f;
 
@@ -131,11 +178,45 @@ int main(int argc, char* argv[])
         // Guard
         for (auto& g : guards)
         {
-            float nx = g.x + g.dir * guardSpeed * dt;
-            if (hitsWall(nx, g.y))
-                g.dir = -g.dir; // Change direction (wall hit)
+            if (canSeePlayer(g))
+            {
+                g.alertTimer = 1.5f;
+            }
+            else if (g.alertTimer > 0.0f)
+            {
+                g.alertTimer -= dt;
+            }
+
+            if (g.alertTimer > 0.0f)
+            {
+                g.mode = GuardMode::Chase;
+
+                if (playerX > g.x)
+                    g.dir = 1;
+                else if (playerX < g.x)
+                    g.dir = -1;
+            }
             else
-                g.x = nx;
+            {
+                g.alertTimer = 0.0f;
+                g.mode = GuardMode::Patrol;
+            }
+
+            const float speed = (g.mode == GuardMode::Chase)
+                ? 85.0f
+                : guardSpeed;
+
+            const float nextX = g.x + g.dir * speed * dt;
+
+            if (hitsWall(nextX, g.y))
+            {
+                if (g.mode == GuardMode::Patrol)
+                    g.dir = -g.dir;
+            }
+            else
+            {
+                g.x = nextX;
+            }
         }
 
         // Collision detection
@@ -164,6 +245,12 @@ int main(int argc, char* argv[])
             printf("CATCH! RESPAWN.\n");
             playerX = spawnX;
             playerY = spawnY;
+
+            for (auto& g : guards)
+            {
+                g.mode = GuardMode::Patrol;
+                g.alertTimer = 0.0f;
+            }
         }
 
         pr.x = (int)playerX;
@@ -186,6 +273,14 @@ int main(int argc, char* argv[])
             SDL_Rect gr{ (int)g.x, (int)g.y, PLAYER_W, PLAYER_H };
             SDL_RenderCopyEx(renderer, guardTex, nullptr, &gr, 0, nullptr,
                              g.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+            SDL_Rect indicator{ static_cast<int>(g.x) + 6,
+                    static_cast<int>(g.y) - 5, 4, 4 };
+
+            if (g.mode == GuardMode::Chase)
+            {
+                SDL_SetRenderDrawColor(renderer, 255, 60, 60, 255);
+                SDL_RenderFillRect(renderer, &indicator);
+            }
         }
 
         SDL_RenderCopyEx(renderer, playerTex, nullptr, &pr, 0, nullptr,

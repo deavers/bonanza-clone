@@ -34,4 +34,5 @@ struct Guard
     float minX;
     float maxX;
     float stunTimer = 0.0f;
+    float alertTimer = 0.0f;
 };

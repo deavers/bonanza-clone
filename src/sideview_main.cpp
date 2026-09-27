@@ -131,16 +131,23 @@ int main(int argc, char* argv[])
     constexpr int EXIT_FLOOR = 0;
     bool won = false;
 
+    constexpr float ROUND_SECONDS = 90.0f;
+    float timeLeft = ROUND_SECONDS;
+    bool timeUp = false;
+    int lastShownSecond = -1;
+
     Uint64 previousTime = SDL_GetPerformanceCounter();
     bool running = true;
 
     while (running)
     {
         Uint64 now = SDL_GetPerformanceCounter();
-        float dt = static_cast<float>(now - previousTime) /
-                   static_cast<float>(SDL_GetPerformanceFrequency());
+
+        float elapsed = static_cast<float>(now - previousTime) /
+                        static_cast<float>(SDL_GetPerformanceFrequency());
+
         previousTime = now;
-        dt = std::min(dt, 0.05f);
+        float dt = std::min(elapsed, 0.05f);
 
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -154,7 +161,7 @@ int main(int argc, char* argv[])
             
             if (event.type == SDL_KEYDOWN &&
                 event.key.keysym.scancode == SDL_SCANCODE_R &&
-                won)
+                (won || timeUp))
             {
                 playerX = 40.0f;
                 currentFloor = 1;
@@ -165,6 +172,9 @@ int main(int argc, char* argv[])
                 inBackLane = false;
                 guards = initialGuards;
                 won = false;
+                timeUp = false;
+                timeLeft = ROUND_SECONDS;
+                lastShownSecond = -1;
 
                 for (auto& treasure : treasures)
                     treasure.taken = false;
@@ -176,6 +186,7 @@ int main(int argc, char* argv[])
                 event.key.keysym.scancode == SDL_SCANCODE_SPACE &&
                 event.key.repeat == 0 &&
                 !won &&
+                !timeUp &&
                 !climbing &&
                 !inBackLane)
             {
@@ -203,6 +214,7 @@ int main(int argc, char* argv[])
                 event.key.keysym.scancode == SDL_SCANCODE_E &&
                 event.key.repeat == 0 &&
                 !won &&
+                !timeUp &&
                 !climbing)
             {
                 float playerCenter = playerX + PLAYER_W / 2.0f;
@@ -221,9 +233,36 @@ int main(int argc, char* argv[])
             }
         }
 
+        if (!won && !timeUp)
+        {
+            timeLeft = std::max(0.0f, timeLeft - elapsed);
+
+            if (timeLeft <= 0.0f)
+            {
+                timeUp = true;
+                SDL_SetWindowTitle(window, "TIME UP! Press R to restart");
+                std::printf("TIME UP!\n");
+            }
+            else
+            {
+                int shownSecond = static_cast<int>(std::ceil(timeLeft));
+
+                if (shownSecond != lastShownSecond)
+                {
+                    lastShownSecond = shownSecond;
+
+                    char title[96];
+                    std::snprintf(title, sizeof(title),
+                                "Side-view prototype | Time: %d",
+                                shownSecond);
+                    SDL_SetWindowTitle(window, title);
+                }
+            }
+        }
+
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
 
-        if (!won)
+        if (!won && !timeUp)
         {
             if (!climbing)
             {
@@ -284,16 +323,36 @@ int main(int argc, char* argv[])
                     inBackLane = false;
                 }
             }
-
+ 
             for (auto& guard : guards)
             {
                 if (guard.stunTimer > 0.0f)
                 {
                     guard.stunTimer = std::max(0.0f, guard.stunTimer - dt);
+                    guard.alertTimer = 0.0f;
                     continue;
                 }
 
-                guard.x += guard.dir * 55.0f * dt;
+                float distanceX = playerX - guard.x;
+
+                bool seesPlayer =
+                    !climbing &&
+                    !inBackLane &&
+                    currentFloor == guard.floor &&
+                    distanceX * guard.dir > 0.0f &&
+                    std::fabs(distanceX) <= 80.0f;
+
+                if (seesPlayer)
+                {
+                    guard.alertTimer = 1.2f;
+                }
+                else
+                {
+                    guard.alertTimer = std::max(0.0f, guard.alertTimer - dt);
+                }
+
+                float guardSpeed = guard.alertTimer > 0.0f ? 80.0f : 55.0f;
+                guard.x += guard.dir * guardSpeed * dt;
 
                 if (guard.x >= guard.maxX)
                 {
@@ -508,6 +567,20 @@ int main(int argc, char* argv[])
                 nullptr,
                 guard.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
             );
+
+            if (guard.alertTimer > 0.0f && guard.stunTimer <= 0.0f)
+            {
+                SDL_SetRenderDrawColor(renderer, 255, 65, 65, 255);
+
+                SDL_Rect alertMark{
+                    static_cast<int>(guard.x) + 6,
+                    floorY(guard.floor) - PLAYER_H - 6,
+                    4,
+                    4
+                };
+
+                SDL_RenderFillRect(renderer, &alertMark);
+            }
         }
 
         SDL_Rect player{

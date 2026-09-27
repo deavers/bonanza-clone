@@ -107,8 +107,11 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::string playerPath = std::string(basePath) + "assets/player.png";
+    std::string assetsPath = std::string(basePath) + "assets/";
     SDL_free(basePath);
+
+    std::string playerPath = assetsPath + "player.png";
+    std::string guardPath = assetsPath + "guard.png";
 
     SDL_Texture* playerTexture =
         IMG_LoadTexture(renderer, playerPath.c_str());
@@ -117,6 +120,21 @@ int main(int argc, char* argv[])
     {
         std::fprintf(stderr, "IMG_LoadTexture (%s): %s\n",
                     playerPath.c_str(), IMG_GetError());
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        IMG_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_Texture* guardTexture =
+    IMG_LoadTexture(renderer, guardPath.c_str());
+
+    if (!guardTexture)
+    {
+        std::fprintf(stderr, "IMG_LoadTexture (%s): %s\n",
+                    guardPath.c_str(), IMG_GetError());
+        SDL_DestroyTexture(playerTexture);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         IMG_Quit();
@@ -454,13 +472,19 @@ int main(int argc, char* argv[])
             };
 
             if (guard.stunTimer > 0.0f)
-                SDL_SetRenderDrawColor(renderer, 130, 130, 140, 255);
+                SDL_SetTextureColorMod(guardTexture, 110, 110, 110);
             else
-                SDL_SetRenderDrawColor(renderer, 70, 110, 220, 255);
+                SDL_SetTextureColorMod(guardTexture, 255, 255, 255);
 
-            SDL_RenderFillRect(renderer, &guardBox);
-
-            SDL_RenderFillRect(renderer, &guardBox);
+            SDL_RenderCopyEx(
+                renderer,
+                guardTexture,
+                nullptr,
+                &guardBox,
+                0,
+                nullptr,
+                guard.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
+            );
         }
 
         SDL_Rect player{
@@ -483,10 +507,12 @@ int main(int argc, char* argv[])
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(guardTexture);
     SDL_DestroyTexture(playerTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     IMG_Quit();
     SDL_Quit();
+    
     return 0;
 }

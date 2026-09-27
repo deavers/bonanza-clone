@@ -35,5 +35,8 @@ add_custom_command(TARGET bonanza_sideview POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/assets/player.png"
         "$<TARGET_FILE_DIR:bonanza_sideview>/assets/player.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/assets/guard.png"
+        "$<TARGET_FILE_DIR:bonanza_sideview>/assets/guard.png"
     VERBATIM
 )

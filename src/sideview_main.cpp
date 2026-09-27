@@ -1,4 +1,6 @@
 #include <SDL.h>
+#include <SDL_image.h>
+#include <string>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -26,6 +28,15 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+
+    if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) != IMG_INIT_PNG)
+    {
+        std::fprintf(stderr, "IMG_Init: %s\n", IMG_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
     SDL_Window* window = SDL_CreateWindow(
         "Side-view prototype",
@@ -60,6 +71,34 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    char* basePath = SDL_GetBasePath();
+    if (!basePath)
+    {
+        std::fprintf(stderr, "SDL_GetBasePath: %s\n", SDL_GetError());
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        IMG_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
+    std::string playerPath = std::string(basePath) + "assets/player.png";
+    SDL_free(basePath);
+
+    SDL_Texture* playerTexture =
+        IMG_LoadTexture(renderer, playerPath.c_str());
+
+    if (!playerTexture)
+    {
+        std::fprintf(stderr, "IMG_LoadTexture (%s): %s\n",
+                    playerPath.c_str(), IMG_GetError());
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        IMG_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
     SDL_RenderSetLogicalSize(renderer, SCREEN_W, SCREEN_H);
 
     float playerX = 40.0f;
@@ -67,6 +106,7 @@ int main(int argc, char* argv[])
     int targetFloor = currentFloor;
     float playerY = static_cast<float>(floorY(currentFloor) - PLAYER_H);
     bool climbing = false;
+    bool facingLeft = false;
 
     Uint64 previousTime = SDL_GetPerformanceCounter();
     bool running = true;
@@ -95,10 +135,16 @@ int main(int argc, char* argv[])
         if (!climbing)
         {
             if (keys[SDL_SCANCODE_LEFT])
+            {
                 playerX -= 100.0f * dt;
+                facingLeft = true;
+            }
 
             if (keys[SDL_SCANCODE_RIGHT])
+            {
                 playerX += 100.0f * dt;
+                facingLeft = false;
+            }
 
             playerX = std::clamp(
                 playerX, 0.0f,
@@ -163,20 +209,41 @@ int main(int argc, char* argv[])
         };
         SDL_RenderFillRect(renderer, &ladder);
 
-        SDL_SetRenderDrawColor(renderer, 80, 200, 80, 255);
         SDL_Rect player{
             static_cast<int>(playerX),
             static_cast<int>(playerY),
             PLAYER_W,
             PLAYER_H
         };
-        SDL_RenderFillRect(renderer, &player);
+
+        SDL_RenderCopyEx(
+            renderer,
+            playerTexture,
+            nullptr,
+            &player,
+            0,
+            nullptr,
+            facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
+        );
+
+        SDL_RenderCopyEx(
+            renderer,
+            playerTexture,
+            nullptr,
+            &player,
+            0,
+            nullptr,
+            facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
+        );
+
 
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(playerTexture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+    IMG_Quit();
     SDL_Quit();
     return 0;
 }

@@ -26,4 +26,14 @@ add_executable(bonanza_sideview src/sideview_main.cpp)
 target_link_libraries(bonanza_sideview PRIVATE
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    $<IF:$<TARGET_EXISTS:SDL2_image::SDL2_image>,SDL2_image::SDL2_image,SDL2_image::SDL2_image-static>
+)
+
+add_custom_command(TARGET bonanza_sideview POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:bonanza_sideview>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/assets/player.png"
+        "$<TARGET_FILE_DIR:bonanza_sideview>/assets/player.png"
+    VERBATIM
 )

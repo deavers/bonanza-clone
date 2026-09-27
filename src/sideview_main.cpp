@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 constexpr int SCREEN_W = 320;
 constexpr int SCREEN_H = 224;
@@ -20,6 +21,13 @@ int floorY(int floor)
 {
     return floor == 0 ? TOP_FLOOR_Y : BOTTOM_FLOOR_Y;
 }
+
+struct Treasure
+{
+    int x;
+    int floor; // 0 - top, 1 - bottom
+    bool taken = false;
+};
 
 int main(int argc, char* argv[])
 {
@@ -108,6 +116,16 @@ int main(int argc, char* argv[])
     bool climbing = false;
     bool facingLeft = false;
 
+    std::vector<Treasure> treasures
+    {
+        { 260, 1, false }, // Lower floor
+        { 40,  0, false }  // Top floor
+    };
+
+    constexpr int EXIT_X = 280;
+    constexpr int EXIT_FLOOR = 0;
+    bool won = false;
+
     Uint64 previousTime = SDL_GetPerformanceCounter();
     bool running = true;
 
@@ -128,66 +146,141 @@ int main(int argc, char* argv[])
             if (event.type == SDL_KEYDOWN &&
                 event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
                 running = false;
+            
+            if (event.type == SDL_KEYDOWN &&
+                event.key.keysym.scancode == SDL_SCANCODE_R &&
+                won)
+            {
+                playerX = 40.0f;
+                currentFloor = 1;
+                targetFloor = 1;
+                playerY = static_cast<float>(floorY(1) - PLAYER_H);
+                climbing = false;
+                facingLeft = false;
+                won = false;
+
+                for (auto& treasure : treasures)
+                    treasure.taken = false;
+
+                SDL_SetWindowTitle(window, "Side-view prototype");
+            }
         }
 
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
 
-        if (!climbing)
+        if (!won)
         {
-            if (keys[SDL_SCANCODE_LEFT])
+            if (!climbing)
             {
-                playerX -= 100.0f * dt;
-                facingLeft = true;
+                if (keys[SDL_SCANCODE_LEFT])
+                {
+                    playerX -= 100.0f * dt;
+                    facingLeft = true;
+                }
+
+                if (keys[SDL_SCANCODE_RIGHT])
+                {
+                    playerX += 100.0f * dt;
+                    facingLeft = false;
+                }
+
+                playerX = std::clamp(
+                    playerX, 0.0f,
+                    static_cast<float>(SCREEN_W - PLAYER_W)
+                );
+
+                float playerCenterX = playerX + PLAYER_W / 2.0f;
+                float ladderCenterX = LADDER_X + PLAYER_W / 2.0f;
+                bool nearLadder = std::fabs(playerCenterX - ladderCenterX) <= 12.0f;
+
+                if (nearLadder &&
+                    currentFloor == 1 &&
+                    keys[SDL_SCANCODE_UP])
+                {
+                    playerX = static_cast<float>(LADDER_X);
+                    targetFloor = 0;
+                    climbing = true;
+                }
+                else if (nearLadder &&
+                        currentFloor == 0 &&
+                        keys[SDL_SCANCODE_DOWN])
+                {
+                    playerX = static_cast<float>(LADDER_X);
+                    targetFloor = 1;
+                    climbing = true;
+                }
             }
 
-            if (keys[SDL_SCANCODE_RIGHT])
+            if (climbing)
             {
-                playerX += 100.0f * dt;
-                facingLeft = false;
+                float destination =
+                    static_cast<float>(floorY(targetFloor) - PLAYER_H);
+                float step = 70.0f * dt;
+
+                if (playerY < destination)
+                    playerY = std::min(playerY + step, destination);
+                else
+                    playerY = std::max(playerY - step, destination);
+
+                if (playerY == destination)
+                {
+                    currentFloor = targetFloor;
+                    climbing = false;
+                }
             }
 
-            playerX = std::clamp(
-                playerX, 0.0f,
-                static_cast<float>(SCREEN_W - PLAYER_W)
-            );
-
-            float playerCenterX = playerX + PLAYER_W / 2.0f;
-            float ladderCenterX = LADDER_X + PLAYER_W / 2.0f;
-            bool nearLadder = std::fabs(playerCenterX - ladderCenterX) <= 12.0f;
-
-            if (nearLadder &&
-                currentFloor == 1 &&
-                keys[SDL_SCANCODE_UP])
+            if (!climbing)
             {
-                playerX = static_cast<float>(LADDER_X);
-                targetFloor = 0;
-                climbing = true;
-            }
-            else if (nearLadder &&
-                     currentFloor == 0 &&
-                     keys[SDL_SCANCODE_DOWN])
-            {
-                playerX = static_cast<float>(LADDER_X);
-                targetFloor = 1;
-                climbing = true;
-            }
-        }
+                SDL_Rect playerBox{
+                    static_cast<int>(playerX),
+                    static_cast<int>(playerY),
+                    PLAYER_W,
+                    PLAYER_H
+                };
 
-        if (climbing)
-        {
-            float destination =
-                static_cast<float>(floorY(targetFloor) - PLAYER_H);
-            float step = 70.0f * dt;
+                for (auto& treasure : treasures)
+                {
+                    if (treasure.taken || treasure.floor != currentFloor)
+                        continue;
 
-            if (playerY < destination)
-                playerY = std::min(playerY + step, destination);
-            else
-                playerY = std::max(playerY - step, destination);
+                    SDL_Rect treasureBox{
+                        treasure.x + 3,
+                        floorY(treasure.floor) - 12,
+                        10,
+                        10
+                    };
 
-            if (playerY == destination)
-            {
-                currentFloor = targetFloor;
-                climbing = false;
+                    if (SDL_HasIntersection(&playerBox, &treasureBox))
+                    {
+                        treasure.taken = true;
+                        std::printf("Treasure collected!\n");
+                    }
+                }
+
+                bool allCollected = std::all_of(
+                    treasures.begin(),
+                    treasures.end(),
+                    [](const Treasure& treasure)
+                    {
+                        return treasure.taken;
+                    }
+                );
+
+                SDL_Rect exitBox{
+                    EXIT_X,
+                    floorY(EXIT_FLOOR) - PLAYER_H,
+                    PLAYER_W,
+                    PLAYER_H
+                };
+
+                if (allCollected &&
+                    currentFloor == EXIT_FLOOR &&
+                    SDL_HasIntersection(&playerBox, &exitBox))
+                {
+                    won = true;
+                    SDL_SetWindowTitle(window, "Mission complete! Press R to restart");
+                    std::printf("MISSION COMPLETE!\n");
+                }
             }
         }
 
@@ -209,6 +302,45 @@ int main(int argc, char* argv[])
         };
         SDL_RenderFillRect(renderer, &ladder);
 
+        bool allCollected = std::all_of(
+            treasures.begin(),
+            treasures.end(),
+            [](const Treasure& treasure)
+            {
+                return treasure.taken;
+            }
+        );
+
+        SDL_Rect exitBox{
+            EXIT_X,
+            floorY(EXIT_FLOOR) - PLAYER_H,
+            PLAYER_W,
+            PLAYER_H
+        };
+
+        if (allCollected)
+            SDL_SetRenderDrawColor(renderer, 70, 210, 110, 255);
+        else
+            SDL_SetRenderDrawColor(renderer, 120, 120, 130, 255);
+
+        SDL_RenderFillRect(renderer, &exitBox);
+
+        SDL_SetRenderDrawColor(renderer, 255, 210, 60, 255);
+
+        for (const auto& treasure : treasures)
+        {
+            if (treasure.taken)
+                continue;
+
+            SDL_Rect box{
+                treasure.x + 3,
+                floorY(treasure.floor) - 12,
+                10,
+                10
+            };
+            SDL_RenderFillRect(renderer, &box);
+        }
+
         SDL_Rect player{
             static_cast<int>(playerX),
             static_cast<int>(playerY),
@@ -225,17 +357,6 @@ int main(int argc, char* argv[])
             nullptr,
             facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
         );
-
-        SDL_RenderCopyEx(
-            renderer,
-            playerTexture,
-            nullptr,
-            &player,
-            0,
-            nullptr,
-            facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
-        );
-
 
         SDL_RenderPresent(renderer);
     }

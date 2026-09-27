@@ -10,6 +10,13 @@ constexpr int SCREEN_W = 320;
 constexpr int SCREEN_H = 224;
 constexpr int SCALE = 3;
 constexpr int TILE = 16;
+constexpr int PLAYER_W = 16, PLAYER_H = 22;
+
+struct Guard
+{
+    float x, y;
+    int dir = 1;
+};
 
 int main(int argc, char* argv[])
 {
@@ -46,44 +53,43 @@ int main(int argc, char* argv[])
     const int levelH = (int)level.size();
     const int levelW = (int)level[0].size();
 
-    float playerX = 32.0f, playerY = 32.0f;
+    float spawnX = 32.0f, spawnY = 32.0f;
+    std::vector<Guard> guards;
     for (int ty = 0; ty < levelH; ty++)
         for (int tx = 0; tx < levelW; tx++)
-            if (level[ty][tx] == 'P')
-            {
-                playerX = (float)(tx * TILE);
-                playerY = (float)(ty * TILE);
-            }
-
+        {
+            if (level[ty][tx] == 'P') { spawnX = (float)(tx * TILE); spawnY = (float)(ty * TILE); }
+            if (level[ty][tx] == 'G') guards.push_back({ (float)(tx * TILE), (float)(ty * TILE), 1 });
+        }
+    float playerX = spawnX, playerY = spawnY;
 
     SDL_Texture* floorTex  = IMG_LoadTexture(renderer, "assets/floor.png");
     SDL_Texture* wallTex   = IMG_LoadTexture(renderer, "assets/wall.png");
     SDL_Texture* playerTex = IMG_LoadTexture(renderer, "assets/player.png");
-    if (!floorTex || !wallTex || !playerTex)
+    SDL_Texture* guardTex  = IMG_LoadTexture(renderer, "assets/guard.png");
+    if (!floorTex || !wallTex || !playerTex || !guardTex)
     {
         printf("Failed to load textures: %s\n", IMG_GetError());
         return 1;
     }
 
-    // Collision detection
-    auto hitsWall = [&](float x, float y, int w, int h) 
+    auto hitsWall = [&](float x, float y)
     {
-        int x0 = (int)x / TILE,        x1 = (int)(x + w - 1) / TILE;
-        int y0 = (int)y / TILE,        y1 = (int)(y + h - 1) / TILE;
+        int x0 = (int)x / TILE, x1 = (int)(x + PLAYER_W - 1) / TILE;
+        int y0 = (int)y / TILE, y1 = (int)(y + PLAYER_H - 1) / TILE;
 
         if (x0 < 0 || y0 < 0 || x1 >= levelW || y1 >= levelH) 
             return true;
 
         for (int ty = y0; ty <= y1; ty++)
             for (int tx = x0; tx <= x1; tx++)
-                if (level[ty][tx] == '#') 
-                    return true;
+                if (level[ty][tx] == '#') return true;
 
         return false;
     };
 
-    constexpr int PLAYER_W = 16, PLAYER_H = 22;
-    const float speed = 100.0f;
+    const float playerSpeed = 100.0f;
+    const float guardSpeed  = 60.0f;
 
     Uint64 prevTime = SDL_GetPerformanceCounter();
     bool running = true;
@@ -101,25 +107,69 @@ int main(int argc, char* argv[])
             if (e.type == SDL_QUIT) running = false;
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
 
+        // Player movement
         float dx = 0, dy = 0;
-        if (keys[SDL_SCANCODE_LEFT])  { 
-            dx = -speed * dt; facingLeft = true; 
+        if (keys[SDL_SCANCODE_LEFT])  
+        { 
+            dx = -playerSpeed * dt; 
+            facingLeft = true; 
         }
-        if (keys[SDL_SCANCODE_RIGHT]) { 
-            dx =  speed * dt; facingLeft = false; 
+        if (keys[SDL_SCANCODE_RIGHT])
+        { 
+            dx =  playerSpeed * dt; 
+            facingLeft = false; 
         }
-        
         if (keys[SDL_SCANCODE_UP])      
-            dy = -speed * dt;
+            dy = -playerSpeed * dt;
         if (keys[SDL_SCANCODE_DOWN])    
-            dy =  speed * dt;
-
-        if (!hitsWall(playerX + dx, playerY, PLAYER_W, PLAYER_H)) 
+            dy =  playerSpeed * dt;
+        if (!hitsWall(playerX + dx, playerY)) 
             playerX += dx;
-        if (!hitsWall(playerX, playerY + dy, PLAYER_W, PLAYER_H)) 
+        if (!hitsWall(playerX, playerY + dy)) 
             playerY += dy;
 
-        // Render
+        // Guard
+        for (auto& g : guards)
+        {
+            float nx = g.x + g.dir * guardSpeed * dt;
+            if (hitsWall(nx, g.y))
+                g.dir = -g.dir; // Change direction (wall hit)
+            else
+                g.x = nx;
+        }
+
+        // Collision detection
+        SDL_Rect pr
+        { 
+            (int)playerX, (int)playerY, 
+            PLAYER_W, PLAYER_H 
+        };
+        bool caught = false;
+        for (auto& g : guards)
+        {
+            SDL_Rect gr
+            { 
+                (int)g.x, (int)g.y, 
+                PLAYER_W, PLAYER_H 
+            };
+
+            if (SDL_HasIntersection(&pr, &gr)) 
+            { 
+                caught = true; 
+                break; 
+            }
+        }
+        if (caught)
+        {
+            printf("CATCH! RESPAWN.\n");
+            playerX = spawnX;
+            playerY = spawnY;
+        }
+
+        pr.x = (int)playerX;
+        pr.y = (int)playerY;
+
+        // RENDER
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
@@ -127,16 +177,23 @@ int main(int argc, char* argv[])
             for (int tx = 0; tx < levelW; tx++)
             {
                 SDL_Rect dst{ tx * TILE, ty * TILE, TILE, TILE };
-                bool solid = level[ty][tx] == '#';
-                SDL_RenderCopy(renderer, solid ? wallTex : floorTex, nullptr, &dst);
+                SDL_RenderCopy(renderer,
+                    level[ty][tx] == '#' ? wallTex : floorTex, nullptr, &dst);
             }
 
-        SDL_Rect pr{ (int)playerX, (int)playerY, PLAYER_W, PLAYER_H };
+        for (auto& g : guards)
+        {
+            SDL_Rect gr{ (int)g.x, (int)g.y, PLAYER_W, PLAYER_H };
+            SDL_RenderCopyEx(renderer, guardTex, nullptr, &gr, 0, nullptr,
+                             g.dir < 0 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+        }
+
         SDL_RenderCopyEx(renderer, playerTex, nullptr, &pr, 0, nullptr,
                          facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(guardTex);
     SDL_DestroyTexture(playerTex);
     SDL_DestroyTexture(wallTex);
     SDL_DestroyTexture(floorTex);
@@ -145,6 +202,5 @@ int main(int argc, char* argv[])
 
     IMG_Quit();
     SDL_Quit();
-
     return 0;
 }

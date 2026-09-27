@@ -29,6 +29,23 @@ struct Treasure
     bool taken = false;
 };
 
+struct Guard
+{
+    float x;
+    int floor;
+    int dir;
+    float minX;
+    float maxX;
+    float stunTimer = 0.0f;
+};
+
+std::vector<Guard> guards{
+    { 200.0f, 1,  1, 170.0f, 280.0f }, // Lower floor
+    { 200.0f, 0, -1, 160.0f, 260.0f }  // Top floor
+};
+
+const std::vector<Guard> initialGuards = guards;
+
 int main(int argc, char* argv[])
 {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -157,12 +174,39 @@ int main(int argc, char* argv[])
                 playerY = static_cast<float>(floorY(1) - PLAYER_H);
                 climbing = false;
                 facingLeft = false;
+                guards = initialGuards;
                 won = false;
 
                 for (auto& treasure : treasures)
                     treasure.taken = false;
 
                 SDL_SetWindowTitle(window, "Side-view prototype");
+            }
+
+            if (event.type == SDL_KEYDOWN &&
+                event.key.keysym.scancode == SDL_SCANCODE_SPACE &&
+                event.key.repeat == 0 &&
+                !won &&
+                !climbing)
+            {
+                float playerCenter = playerX + PLAYER_W / 2.0f;
+                int shotDirection = facingLeft ? -1 : 1;
+
+                for (auto& guard : guards)
+                {
+                    if (guard.floor != currentFloor || guard.stunTimer > 0.0f)
+                        continue;
+
+                    float guardCenter = guard.x + PLAYER_W / 2.0f;
+                    float distance = (guardCenter - playerCenter) * shotDirection;
+
+                    if (distance > 0.0f && distance <= 70.0f)
+                    {
+                        guard.stunTimer = 2.5f;
+                        std::printf("Guard stunned!\n");
+                        break;
+                    }
+                }
             }
         }
 
@@ -229,6 +273,28 @@ int main(int argc, char* argv[])
                 }
             }
 
+            for (auto& guard : guards)
+            {
+                if (guard.stunTimer > 0.0f)
+                {
+                    guard.stunTimer = std::max(0.0f, guard.stunTimer - dt);
+                    continue;
+                }
+
+                guard.x += guard.dir * 55.0f * dt;
+
+                if (guard.x >= guard.maxX)
+                {
+                    guard.x = guard.maxX;
+                    guard.dir = -1;
+                }
+                else if (guard.x <= guard.minX)
+                {
+                    guard.x = guard.minX;
+                    guard.dir = 1;
+                }
+            }
+
             if (!climbing)
             {
                 SDL_Rect playerBox{
@@ -237,6 +303,41 @@ int main(int argc, char* argv[])
                     PLAYER_W,
                     PLAYER_H
                 };
+
+                bool caught = false;
+
+                for (const auto& guard : guards)
+                {
+                    if (guard.floor != currentFloor || guard.stunTimer > 0.0f)
+                        continue;
+
+                    SDL_Rect guardBox{
+                        static_cast<int>(guard.x),
+                        floorY(guard.floor) - PLAYER_H,
+                        PLAYER_W,
+                        PLAYER_H
+                    };
+
+                    if (SDL_HasIntersection(&playerBox, &guardBox))
+                    {
+                        caught = true;
+                        break;
+                    }
+                }
+
+                if (caught)
+                {
+                    std::printf("CAUGHT! Back to start.\n");
+
+                    playerX = 40.0f;
+                    currentFloor = 1;
+                    targetFloor = 1;
+                    playerY = static_cast<float>(floorY(1) - PLAYER_H);
+                    climbing = false;
+                    guards = initialGuards;
+
+                    continue; // Skip the rest of the loop to avoid processing further after being caught
+                }
 
                 for (auto& treasure : treasures)
                 {
@@ -339,6 +440,27 @@ int main(int argc, char* argv[])
                 10
             };
             SDL_RenderFillRect(renderer, &box);
+        }
+
+        SDL_SetRenderDrawColor(renderer, 70, 110, 220, 255);
+
+        for (const auto& guard : guards)
+        {
+            SDL_Rect guardBox{
+                static_cast<int>(guard.x),
+                floorY(guard.floor) - PLAYER_H,
+                PLAYER_W,
+                PLAYER_H
+            };
+
+            if (guard.stunTimer > 0.0f)
+                SDL_SetRenderDrawColor(renderer, 130, 130, 140, 255);
+            else
+                SDL_SetRenderDrawColor(renderer, 70, 110, 220, 255);
+
+            SDL_RenderFillRect(renderer, &guardBox);
+
+            SDL_RenderFillRect(renderer, &guardBox);
         }
 
         SDL_Rect player{

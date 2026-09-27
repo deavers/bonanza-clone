@@ -20,3 +20,10 @@ add_custom_command(TARGET bonanza POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/levels $<TARGET_FILE_DIR:bonanza>/levels
 )
+
+add_executable(bonanza_sideview src/sideview_main.cpp)
+
+target_link_libraries(bonanza_sideview PRIVATE
+    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+)
